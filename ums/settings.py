@@ -10,7 +10,7 @@ SECRET_KEY = 'django-insecure-ui!xsqes#ofp4(&wkp9e+bn9nd+rau3chg%f+i=yh3061r4$we
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 # Application definition
 
@@ -28,9 +28,9 @@ INSTALLED_APPS = [
     'ums.apps.accounts',
     'ums.apps.core',
     'ums.apps.project',
+    'taggit',
     'viewflow',
     # 'viewflow.rest.apps.ViewflowRestNSConfig',
-
 ]
 
 MIDDLEWARE = [
@@ -71,7 +71,7 @@ WSGI_APPLICATION = 'ums.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'ums',
+        'NAME': 'ums1',
         'USER': 'root',
         'PASSWORD': 'ew3402123',
         'HOST': 'localhost',
