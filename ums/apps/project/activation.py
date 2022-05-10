@@ -2,7 +2,8 @@ from django.db import transaction
 from django.utils.timezone import now
 from django.utils.translation import pgettext_lazy
 
-class STATUS(object):
+
+class STATUS:
     """Activation status constants used in the viewflow.
     3d party code can use any other strings in addition to build in
     status codes.

@@ -21,3 +21,7 @@ class ProjectStatusChoices(models.TextChoices):
     LOCK = 'LOCK', _('项目锁定')  # 项目被锁定，与end一样，但是项目可能未结束
 
 
+class AchievementStateChoices(models.TextChoices):
+    NEW = '1', _('新创建')
+
+
