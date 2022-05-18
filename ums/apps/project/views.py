@@ -5,21 +5,26 @@ from django.shortcuts import get_object_or_404
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
-from guardian.shortcuts import assign_perm, get_users_with_perms
+from django.contrib.contenttypes.models import ContentType
+from django.db.models import Q
+from guardian.shortcuts import assign_perm, get_users_with_perms, get_user_perms, remove_perm, get_perms
+from guardian.core import ObjectPermissionChecker
 from rest_framework import generics, filters
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.decorators import action
 from rest_framework.permissions import DjangoObjectPermissions, DjangoModelPermissions, \
-    DjangoModelPermissionsOrAnonReadOnly
+    DjangoModelPermissionsOrAnonReadOnly, IsAuthenticated
 from rest_framework import viewsets
 from rest_framework import status
 from .models import Project, Process, Task, FileManager, Achievement
 from .serializers import ProjectSerializer, ProcessSerializer, TaskSerializer, FileManagerSerializer, \
     AchievementSerializer
 from ..accounts.utils import RoleChoices
-from .utils import ProjectStatusChoices
+from .utils import ProjectStatusChoices, AchievementStateChoices
+from .flow import AchievementProcessHandlerFirstStage, ActionHandler
+from .activation import STATUS
 
 __all__ = (
     'ProcessCreateListView',
@@ -129,74 +134,169 @@ class AchievementViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         instance = serializer.save()
         # assign perm
-        try:
-            # step1. assign change_achievement, delete_achievement, view_achievement to achievement creator
-            assert instance.creator == self.request.user.id
+        # try:
+        # step1. assign change_achievement, delete_achievement, view_achievement to achievement creator
+        assert instance.creator == self.request.user
 
-            assign_perm('change_achievement', instance.creator, instance)
-            assign_perm('submit_achievement', instance.creator, instance)
-            assign_perm('delete_achievement', instance.creator, instance)
-            # todo: submit_achievement;
-            # step2. all project members should have view achievement permission(maybe to all users)
-            project = instance.project  # Project object
-            members = project.project_members
-            for member in members:
-                assign_perm('view_achievement', member, instance)
+        assign_perm('change_achievement', instance.creator, instance)
+        assign_perm('submit_achievement', instance.creator, instance)
+        assign_perm('delete_achievement', instance.creator, instance)
+        # todo: submit_achievement;
+        # step2. all project members should have view achievement permission(maybe to all users)
+        project = instance.project  # Project object
+        members = project.project_members
+        for member in members.all():
+            assign_perm('view_achievement', member, instance)
 
-            sponsors = project.project_sponsor  # m2m manager
-            # todo: lv1_approval
-            assert sponsors.count() > 0
-            for sponsor in sponsors:
-                assign_perm('approve_achievement_lv1', sponsor, instance)
-            # step3. project leader permissions
-            leaders = project.project_approver
-            assert leaders.count() > 0
-            for leader in leaders:
-                assign_perm('approve_achievement_lv2', leader, instance)
-            secretaries = User.objects.filter(
-                role__in=(RoleChoices.SECRETARY.value, RoleChoices.ADMIN.value, RoleChoices.DEV.value))
-            assert secretaries.count() > 0
-            for secretary in secretaries:
-                assign_perm('final_review_achievement', secretary, instance)
-        except AssertionError:
-            # only write to log system.
-            logging.error(
-                f"""{instance.id} permission assignment not finish! May caused by no leader or sponsor provided by project instance.""")
+        secretaries = User.objects.filter(
+            role__in=(RoleChoices.SECRETARY.value, RoleChoices.ADMIN.value, RoleChoices.DEV.value))
+        assert secretaries.count() > 0
+        for secretary in secretaries.all():
+            assign_perm('final_review_achievement', secretary, instance)
+        # except AssertionError:
+        #     # only write to log system.
+        #     logging.error(
+        #         f"""{instance.id} permission assignment not finish! May caused by no leader or sponsor provided by project instance.""")
 
-    @action(detail=True)
+    def check_process_exists(self, instance, lv):
+        content_type_object = ContentType.objects.get(app_label=instance._meta.app_label,
+                                                      model=instance._meta.model.__name__)
+        if Process.objects.filter(~Q(status__in=[STATUS.DONE, STATUS.ERROR, STATUS.CANCELED]),  # 完成，错误，撤销
+                                  data__activation='approval', artifact_content_type=content_type_object,
+                                  artifact_object_id=instance.pk, data__stage=lv
+                                  ).exists():
+            # 同时间只能有一个进行中的状态
+            logging.critical('Process already exists!')
+            return True
+        return False
+
+    @action(detail=True, methods=['put'])
     @permission_classes([DjangoObjectPermissions])
     def submit(self, request, *args, **kwargs):
         """
+        first submit
         submit method， change status to submit
         :param request:
         :return:
         """
-
         instance = self.get_object()
+        stage = request.data.get('level', 1)
+        data = {'state': AchievementStateChoices.SUB.value}
+        print(request.data, kwargs, args)
+        if request.data.get('level', 1) == 1 and request.user not in instance.project.project_sponsor.all():
+            # lv1 approval process
+            if self.check_process_exists(instance, 1):
+                return Response({'msg': '流程已存在，请勿重复提交!'}, status=400)
+            data['status1'] = STATUS.STARTED
+        else:
+            # 即使stage ==1 但提交者是负责人之一的话，直接进入第二级审批。
+            # lv2 approval process
+            try:
+                if instance.status1 != STATUS.DONE:  # 必须通过一级审批
+                    assert request.user in instance.project.project_sponsor.all()
+                    # 如果是负责人自己提交
+                    data['status1'] = STATUS.DONE
+            except AssertionError:
+                return Response({'msg': '成果必须首先通过负责人审批!'}, status=400)
+            if self.check_process_exists(instance, 2):
+                return Response({'msg': '流程已存在，请勿重复提交!'}, status=400)
+            stage = 2
+            data['status2'] = STATUS.STARTED
+        # 存在状态为进行中的其他process
+        # ['change_achievement', 'delete_achievement', 'submit_achievement', 'view_achievement']
+        logging.info(f'user permissions are {get_user_perms(request.user, instance)}')
         if not request.user.has_perm('submit_achievement', instance):
+            # 需要用户有提交权限
+            logging.warning(
+                f"{request.user.name} doest has submit permisson against {instance}"
+            )
+            logging.warning(f'user permissions are {get_user_perms(request.user, instance)}')
             raise PermissionDenied()
-        serializer = self.get_serializer(instance)
-        # call process handler
-        # processhandler(instance)
-
+        # when achievement creator is sponsor
+        serializer = self.get_serializer(instance, data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_submit(serializer, stage)
         return Response(serializer.data)
 
+    def perform_submit(self, serializer, stage):
+        user = self.request.user
+        instance = serializer.save()
+        perm = 'approve_achievement_lv1'
+        if stage == 2:
+            perm = 'approve_achievement_lv2'
+        # 提交后回收提交者的 提交、修改、删除权限。赋予相关用户审核权限, 并赋予提交者撤销权限
+        uid = self.request.data.get('required_approver')
+        try:
+            approver = User.objects.filter(pk__in=[u.get('id') for u in uid])
+            print(approver, instance.project.project_approver.all())
+            for a in approver:
+                print(a)
+                if stage == 1:
+                    assert a in instance.project.project_sponsor.all()
 
-    def perform_submit(self):
-        """
-        permission upadte
-        :return:
-        """
-        pass
+                else:
+                    assert a in instance.project.project_approver.all()
+                    assert instance.status1 == STATUS.DONE
+                assign_perm(perm, a, instance)
+        except AssertionError:
+            raise Exception('Error')
+        except:
+            raise Exception('Error')
 
-    @action(detail=True)
-    def withdraw(self, request):
+        remove_perm('submit_achievement', user, instance)
+        remove_perm('delete_achievement', user, instance)
+        remove_perm('change_achievement', user, instance)
+        #
+        assign_perm('withdraw_achievement', user, instance)
+        AchievementProcessHandlerFirstStage.create_process(
+            instance=instance,
+            **self.request.data
+        )
+        logging.warning(f'after user permissions are {get_user_perms(self.request.user, instance)}')
+
+    @action(detail=True, methods=['put'])
+    @permission_classes([IsAuthenticated])
+    def withdraw(self, request, *args, **kwargs):
         """
+        状态： 已提交，未通过
 
         :param request:
         :return:
         """
-        pass
+        instance = self.get_object()
+        user = request.user
+        checker = ObjectPermissionChecker(user)
+        if checker.has_perm('withdraw_achievement', instance):
+            # 用户有撤销权限
+            # step 1: add task withdraw
+            # step 2: process => cancel
+            withdraw_handler = ActionHandler(instance)
+            withdraw_handler.withdraw(comments=request.data.get('comments', ''))
+            remove_perm('withdraw_achievement', user, instance)
+            assign_perm('submit_achievement', user, instance)
+            assign_perm('change_achievement', user, instance)
+            assign_perm('delete_achievement', user, instance)
+            # remove approval permissions from sponsor and leaders
+            for a in instance.project.project_sponsor.all():
+                if 'approve_achievement_lv1' in get_perms(a, instance):
+                    remove_perm('approve_achievement_lv1', a, instance)
+            for a in instance.project.project_approver.all():
+                if 'approve_achievement_lv2' in get_perms(a, instance):
+                    remove_perm('approve_achievement_lv2', a, instance)
+        else:
+            raise PermissionDenied()
+        # 更新为 撤销、new、new
+        data = {'state': AchievementStateChoices.WITHDRAW.value, 'status1': STATUS.NEW, 'status2': STATUS.NEW}
+        serializer = self.get_serializer(instance, data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        if getattr(instance, '_prefetched_objects_cache', None):
+            # If 'prefetch_related' has been applied to a queryset, we need to
+            # forcibly invalidate the prefetch cache on the instance.
+            instance._prefetched_objects_cache = {}
+
+        return Response(serializer.data)
 
     def perform_withdraw(self):
         """
@@ -217,23 +317,44 @@ class AchievementViewSet(viewsets.ModelViewSet):
     def perform_review(self):
         pass
 
-    @action(detail=True)
-    def update_status(self, request):
-        """
-        待定
-        :param request:
-        :return:
-        """
-        pass
+    @action(detail=True, methods=['put'])
+    @permission_classes([IsAuthenticated])
+    def approve(self, request, *args, **kwargs):
+        # 1. 确认权限
+        # 2. 更改=》
+        instance = self.get_object()
+        user = request.user
+        checker = ObjectPermissionChecker(user)
+        print("approve task")
+        print(get_perms(user, instance))
+        if checker.has_perm('approve_achievement_lv1', instance) or checker.has_perm('approve_achievement_lv2',
+                                                                                     instance):
+            # 如果有1级或者2级权限
 
-    def perform_update_status(self):
+            # 检查是否有分配给自己的task（且instance是本object的审批任务）
+            # 同一时间、只能有一个审批任务，可直接用get
+            print(get_perms(user,instance))
+            approval_handler = ActionHandler(instance)
+            process = approval_handler.approve(request.data.get('comments', ''), user)
+            # 通过后=>如果是1级审批=>
+        else:
+            print('no permission')
+            raise PermissionDenied()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+
+
+    @action(detail=True, methods='put')
+    @permission_classes([IsAuthenticated])
+    def deny(self, request, *args, **kwargs):
         pass
 
     @action(detail=False)
     def get_achievements_by_projectid(self, request):
         # l = Achievement.objects.filter(project_id=request.query_params.get('projectid'))
         queryset = self.filter_queryset(self.get_queryset()).filter(project_id=request.query_params.get('projectid'))
-        print(queryset, request.query_params.get('projectid'))
+
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
@@ -252,13 +373,9 @@ class AchievementViewSet(viewsets.ModelViewSet):
                 raise PermissionDenied()
         instance = self.get_object()
         # contains object permissions against this achievement
-        permissions = get_users_with_perms(instance, attach_perms=True, with_superusers=False)
-        # filter permissions
-        data = []
-        if permissions.get(user):
-            data = permissions.get(user)
+        permissions = get_user_perms(user, instance)
 
-        return Response(data)
+        return Response(permissions)
 
 
 class FileManagerViewSet(viewsets.ModelViewSet):
@@ -302,8 +419,6 @@ class FileManagerViewSet(viewsets.ModelViewSet):
             # assign_perm()
         else:
             raise PermissionDenied()
-
-
 
     @action(detail=False)
     def get_latest_tags(self, request):

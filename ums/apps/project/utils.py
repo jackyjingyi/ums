@@ -23,5 +23,10 @@ class ProjectStatusChoices(models.TextChoices):
 
 class AchievementStateChoices(models.TextChoices):
     NEW = '1', _('新创建')
+    SUB = '2', _('已提交')
+    APP = '3', _('审批通过')
+    DENY = '4', _('审批驳回')
+    WITHDRAW = '5', _('已撤销')
+
 
 
