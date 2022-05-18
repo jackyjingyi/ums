@@ -18,6 +18,8 @@ urlpatterns = [
                   # re_path(r"^files/$", FileManagerListCreateView.as_view()),
                   re_path(r"^process/$", ProcessCreateListView.as_view()),
                   re_path(r"^process/(?P<pk>[0-9a-f-]+)/$", ProcessDetailView.as_view()),
+                  re_path(r"^task/$", TaskListCreateView.as_view()),
+                  re_path(r"^task/(?P<pk>[0-9a-f-]+)/$", TaskDetailView.as_view()),
                   path('', include(router.urls)),
                   # re_path(r"^project/achievement/$", )
               ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

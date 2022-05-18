@@ -36,7 +36,7 @@ class OCTUser(AbstractBaseUser, PermissionsMixin):
     name = models.CharField(_("name"), max_length=150, blank=True)
     phone_number = models.CharField(validators=[phone_regex], max_length=17, blank=True)  # Validators should be a list
     department = models.CharField(_("department"), max_length=150, blank=True)
-    role = models.IntegerField(choices=RoleChoices.choices, verbose_name=_('role'),null=True)
+    role = models.IntegerField(choices=RoleChoices.choices, verbose_name=_('role'), null=True)
     email = models.EmailField(_("email address"), blank=True)
     mime = models.URLField(_('头像'), max_length=255, blank=True)
     is_staff = models.BooleanField(
@@ -86,7 +86,7 @@ class OCTUser(AbstractBaseUser, PermissionsMixin):
         send_mail(subject, message, from_email, [self.email], **kwargs)
 
     def __str__(self):
-        return self.name + " | " + self.username
+        return self.name + " | " + str(self.username)
 
 
 class GroupType(models.Model):
@@ -99,9 +99,11 @@ class GroupType(models.Model):
 
 
 class GroupProfile(models.Model):
-    group = models.OneToOneField(Group, on_delete=models.CASCADE,unique=True)
-    supervisor = models.OneToOneField(OCTUser, on_delete=models.CASCADE, related_name='supervisor_op',limit_choices_to={'role':RoleChoices.PROJECT_SPONSOR.value})
-    leader = models.ManyToManyField(OCTUser, related_name='leader_of',limit_choices_to={'role':RoleChoices.APPROVAL_LEADER.value})
+    group = models.OneToOneField(Group, on_delete=models.CASCADE, unique=True)
+    supervisor = models.OneToOneField(OCTUser, on_delete=models.CASCADE, related_name='supervisor_op',
+                                      limit_choices_to={'role': RoleChoices.PROJECT_SPONSOR.value})
+    leader = models.ManyToManyField(OCTUser, related_name='leader_of',
+                                    limit_choices_to={'role': RoleChoices.APPROVAL_LEADER.value})
 
     def __str__(self):
         return self.group.name

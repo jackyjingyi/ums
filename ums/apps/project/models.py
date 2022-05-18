@@ -64,10 +64,10 @@ class Achievement(models.Model):
     updated = models.DateTimeField(_('更新时间'), auto_now=True, null=True)
     state = models.CharField(_('流程状态'), max_length=5, choices=AchievementStateChoices.choices,
                              default=AchievementStateChoices.NEW.value, db_index=True)
-    status1 = models.CharField(_('一级审批状态'), max_length=5, default=STATUS.NEW)
-    status2 = models.CharField(_('二级审批状态'), max_length=5, default=STATUS.NEW)
-    is_finished = models.BooleanField(default=False, help_text='流程走完，需要商务秘书及时review',db_index=True)
-    is_reviewed = models.BooleanField(default=False, help_text='对接展示',db_index=True)
+    status1 = models.CharField(_('一级审批状态'), max_length=25, default=STATUS.NEW)
+    status2 = models.CharField(_('二级审批状态'), max_length=25, default=STATUS.NEW)
+    is_finished = models.BooleanField(default=False, help_text='流程走完，需要商务秘书及时review', db_index=True)
+    is_reviewed = models.BooleanField(default=False, help_text='对接展示', db_index=True)
 
     class Meta:
         ordering = ['-created', '-updated']
@@ -119,6 +119,9 @@ class AbsProcess(models.Model):
     created = models.DateTimeField(_('Created'), auto_now_add=True)
     finished = models.DateTimeField(_('Finished'), blank=True, null=True)
 
+    class Meta:
+        abstract = True
+
 
 class AbsTask(models.Model):
     flow_task_type = models.CharField(_('Type'), max_length=50)
@@ -129,6 +132,9 @@ class AbsTask(models.Model):
     started = models.DateTimeField(_('Started'), blank=True, null=True)
     finished = models.DateTimeField('Finished', blank=True, null=True)
     previous = models.ManyToManyField('self', symmetrical=False, related_name='leading', verbose_name=_('Previous'))
+
+    class Meta:
+        abstract = True
 
 
 class Process(AbsProcess):
@@ -145,6 +151,11 @@ class Process(AbsProcess):
         ordering = ['-created']
         verbose_name = _('Process')
         verbose_name_plural = _('Process list')
+        indexes = [
+            models.Index(
+                fields=["artifact_content_type", "artifact_object_id"]
+            )
+        ]
 
 
 class Task(AbsTask):
@@ -170,3 +181,8 @@ class Task(AbsTask):
         verbose_name = _('Task')
         verbose_name_plural = _('Tasks')
         ordering = ['-created']
+        indexes = [
+            models.Index(
+                fields=["artifact_content_type", "artifact_object_id"]
+            )
+        ]
