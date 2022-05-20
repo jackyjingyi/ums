@@ -53,6 +53,7 @@ class AchievementProcessHandlerFirstStage(AchievementProcessHandler):
         """
         flow_type = kwargs.get('flow_type', 'SINGLE')
         approver = kwargs.get('required_approver', None)
+        user = kwargs.get('user')
         perm = 'approve_achievement_lv1'
         print(type(approver), approver)
         if not approver:
@@ -77,7 +78,7 @@ class AchievementProcessHandlerFirstStage(AchievementProcessHandler):
                 'flow_type': flow_type,  # 会签JOIN，或签OR，单签SINGLE
                 # 'due_range': 30
                 'approve': approver,
-                'owner': {'id': instance.creator.id, 'name': instance.creator.name},
+                'owner': {'id': user.id, 'name': user.name, 'mime': user.mime},
                 'allow_withdraw': True,
                 'show_other_output': True,  # 向其他用户展示成果（仅展示）
                 'activation': 'approval',
@@ -96,7 +97,7 @@ class AchievementProcessHandlerFirstStage(AchievementProcessHandler):
             flow_task_type=flow_type,
             artifact_content_type=content_type_object,
             artifact_object_id=instance.pk,
-            owner=instance.creator,
+            owner=user,
             # external_task_id
             owner_permission='submit_achievement',
             comments=comments,
@@ -131,7 +132,8 @@ class AchievementProcessHandlerFirstStage(AchievementProcessHandler):
                 owner_permission=data.get("permission"),
                 status=STATUS.ASSIGNED,  # 提交已完成，分配给sponsor
                 data={
-                    'is_first': 0
+                    'is_first': 0,
+                    'submitted_by': init_task.owner.name
                 }
             )
             task.assigned = timezone.now()
@@ -162,6 +164,7 @@ class ActionHandler:
         tasks = Task.objects.filter(
             process=process
         ).order_by('-created')
+        print(comments)
         task = Task(
             process=process,
             flow_task_type=process.data.get('flow_type', 'SINGLE'),
@@ -184,7 +187,7 @@ class ActionHandler:
             tasks[0]
         )
         for t in tasks:
-            if t.status != STATUS.DONE and t.status != STATUS.ERROR and t.status != STATUS.CANCELED:
+            if t.status != STATUS.DONE and t.status != STATUS.ERROR and t.status != STATUS.CANCELED and t.status != STATUS.DENY:
                 t.status = STATUS.CANCELED
                 t.comments = '提交人撤销，自动处理。'
                 t.save()
@@ -217,9 +220,9 @@ class ActionHandler:
                 process.finished = timezone.now()
                 process.save()
         else:
-            if process.data.get('flow_type', 'SINGLE') == 'OR':
+            # if process.data.get('flow_type', 'SINGLE') == 'OR':
                 # 将所有task状态改为通过
-                self.perform_or(first_task, STATUS.DONE)
+            self.perform_or(first_task, STATUS.DONE)
             process.status = STATUS.DONE
             process.finished = timezone.now()
             process.save()
@@ -251,28 +254,33 @@ class ActionHandler:
             self._flush_perms(stage)
             self.instance.state = AchievementStateChoices.APP.value
             self.instance.status2 = STATUS.DONE
+        # state 改为已通过
         self.instance.state = AchievementStateChoices.APP.value
         self.instance.save()
 
     def _flush_perms(self, stage):
         # 1. achievement creator
-        creator = self.instance.creator
+        members = self.instance.project.project_members.all()
         sponsors = self.instance.project.project_sponsor.all()
         leaders = self.instance.project.project_approver.all()
 
         # when lv1 pass
         # remove creator's withdraw permission, and change/submit/delete(if have)
-        remove_perm('withdraw_achievement', creator, self.instance)
-        remove_perm('change_achievement', creator, self.instance)
-        remove_perm('delete_achievement', creator, self.instance)
-        remove_perm('submit_achievement', creator, self.instance)
+        for member in members:
+            remove_perm('withdraw_achievement', member, self.instance)
+            remove_perm('change_achievement', member, self.instance)
+            remove_perm('delete_achievement', member, self.instance)
+            remove_perm('submit_achievement', member, self.instance)
 
         # sponsor 已经审批完毕，释放app权限，
         for sponsor in sponsors:
+            print('working on it ')
+            print(sponsor)
             remove_perm('withdraw_achievement', sponsor, self.instance)
             remove_perm('submit_achievement', sponsor, self.instance)
             remove_perm('delete_achievement', sponsor, self.instance)
-            remove_perm('approval_achievement_lv1', sponsor, self.instance)
+            remove_perm('approve_achievement_lv1', sponsor, self.instance)
+            print(get_perms(sponsor, self.instance))
         if stage == 1:
             return True
         for leader in leaders:
@@ -280,7 +288,7 @@ class ActionHandler:
             remove_perm('withdraw_achievement', leader, self.instance)
             remove_perm('submit_achievement', leader, self.instance)
             remove_perm('delete_achievement', leader, self.instance)
-            remove_perm('approval_achievement_lv2', leader, self.instance)
+            remove_perm('approve_achievement_lv2', leader, self.instance)
         return True
 
     def perform_join(self, task):
@@ -300,6 +308,7 @@ class ActionHandler:
                 task.save()
 
     def _approve(self, process, comments, user, stage):
+        print(comments)
         perm = 'approve_achievement_lv1'
         if stage == 2:
             perm = 'approve_achievement_lv2'
@@ -321,3 +330,65 @@ class ActionHandler:
             # todo: raise 500
             print(e)
             raise Exception
+
+    def deny(self, comments, user):
+        """
+         任一审批人 deny,流程deny，权限清洗，仅creator有withdraw权限，
+        :param comments:
+        :param user:
+        :return:
+        """
+        process = self.get_process()
+        stage = process.data.get('stage', 1)
+        if stage == 1:
+            # 执行具体动作
+            self._deny(process, comments, user, 1)
+        else:
+            self._deny(process, comments, user, 2)
+        #
+        process.status = STATUS.DENY
+        process.finished = timezone.now()
+        process.save()
+
+        self._deny_after(stage)
+        return process
+
+    def _deny(self, process, comments, user, stage):
+        perm = 'approve_achievement_lv1'
+        if stage == 2:
+            perm = 'approve_achievement_lv2'
+        try:
+            users_tasks = Task.objects.filter(
+                status=STATUS.ASSIGNED,
+                artifact_content_type=self.content_type_object,
+                artifact_object_id=self.object_id,
+                owner_permission=perm,
+                process=process
+            )
+            for task in users_tasks:
+                task.status = STATUS.DENY
+                task.finished = timezone.now()
+                if task.owner == user:
+                    task.comments = comments
+                else:
+                    task.comments = 'auto deny'
+                print(task)
+                task.save()
+        except Exception as e:
+            # todo: raise 500
+            print(e)
+            raise Exception
+
+    def _deny_after(self, stage):
+        # todo  分配权限
+        user = self.instance.creator
+        self._flush_perms(2)  # 清空
+        # state 改为已通过
+
+        assign_perm('withdraw_achievement', user, self.instance)
+        self.instance.state = AchievementStateChoices.DENY.value
+        if stage == 1:
+            self.instance.status1 = STATUS.DENY
+        elif stage == 2:
+            self.instance.status2 = STATUS.DENY
+        self.instance.save()

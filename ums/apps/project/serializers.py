@@ -5,7 +5,11 @@ from taggit.serializers import TaggitSerializer, TagListSerializerField
 from ums.apps.accounts.serializers import UserSerializer
 from .models import Project, Process, Task, FileManager, Achievement
 from .utils import AchievementStateChoices
-from .activation import STATUS
+from .activation import STATUS, STATUS_DISPLAY
+
+
+def get_status_display(status):
+    return STATUS_DISPLAY[status]
 
 
 class FileManagerSerializer(TaggitSerializer, serializers.ModelSerializer):
@@ -20,7 +24,7 @@ class FileManagerSerializer(TaggitSerializer, serializers.ModelSerializer):
         ret = super().to_representation(instance)
         if ret['file_name']:
             ret['file_name'] = ret['file_name'].split('/')[-1]
-
+        ret.pop('file')
         return ret
 
 
@@ -74,9 +78,9 @@ class AchievementSerializer(serializers.ModelSerializer):
             if instance.status2 == STATUS.DONE:
                 return '分管领导审核通过'
         elif instance.state == AchievementStateChoices.DENY:
-            if instance.status1 == STATUS.ERROR:
+            if instance.status1 == STATUS.DENY:
                 return '负责人驳回。'
-            if instance.status2 == STATUS.ERROR:
+            if instance.status2 == STATUS.DENY:
                 return '分管领导驳回'
         elif instance.state == AchievementStateChoices.WITHDRAW:
             return '已撤销'
@@ -103,17 +107,30 @@ class ArtifactObjectRelatedField(serializers.RelatedField):
         return serializer.data
 
 
-class ProcessSerializer(serializers.ModelSerializer):
-    artifact = ArtifactObjectRelatedField(read_only=True)
-
-    class Meta:
-        model = Process
-        fields = "__all__"
-
-
 class TaskSerializer(serializers.ModelSerializer):
-    artifact = ArtifactObjectRelatedField(read_only=True)
+    project_id = serializers.CharField(source='artifact.project.id')
+    project_name = serializers.CharField(source='artifact.project.project_title')
+    achievement_name = serializers.CharField(source='artifact.name')
 
     class Meta:
         model = Task
         fields = "__all__"
+        ordering = ['finished', 'id']
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if instance:
+            ret['owner_name'] = instance.owner.name
+            ret['owner_mime'] = instance.owner.mime
+            ret['status_display'] = get_status_display(instance.status)
+            ret['submitted_by'] = instance.data.get('submitted_by', 'person')
+        return ret
+
+
+class ProcessSerializer(serializers.ModelSerializer):
+    task = TaskSerializer(read_only=True, many=True)
+
+    class Meta:
+        model = Process
+        fields = "__all__"
+        ordering = ['finished']
