@@ -11,15 +11,8 @@ router = DefaultRouter()
 router.register(r'project', ProjectViewSet, basename='project')
 router.register(r'achievement', AchievementViewSet, basename='achievement')
 router.register(r'file', FileManagerViewSet, basename='file')
+router.register(r'process', ProcessViewSet, basename='process')
+router.register(r'task', TaskViewSet, basename='task')
 
-urlpatterns = [
-                  # re_path(r"$", ProjectCreateListView.as_view()),
-                  # re_path(r"^instance/(?P<pk>[0-9a-f-]+)/$", ProjectDetailView.as_view()),
-                  # re_path(r"^files/$", FileManagerListCreateView.as_view()),
-                  re_path(r"^process/$", ProcessCreateListView.as_view()),
-                  re_path(r"^process/(?P<pk>[0-9a-f-]+)/$", ProcessDetailView.as_view()),
-                  re_path(r"^task/$", TaskListCreateView.as_view()),
-                  re_path(r"^task/(?P<pk>[0-9a-f-]+)/$", TaskDetailView.as_view()),
-                  path('', include(router.urls)),
-                  # re_path(r"^project/achievement/$", )
-              ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+urlpatterns = [path('', include(router.urls)),
+               ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

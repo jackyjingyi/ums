@@ -148,7 +148,7 @@ class Process(AbsProcess):
     data = JSONField(null=True, blank=True)
 
     class Meta:
-        ordering = ['-created']
+        ordering = ['-finished', '-id', '-created']
         verbose_name = _('Process')
         verbose_name_plural = _('Process list')
         indexes = [
@@ -159,7 +159,8 @@ class Process(AbsProcess):
 
 
 class Task(AbsTask):
-    process = models.ForeignKey(Process, on_delete=models.CASCADE, verbose_name=_('Process'))
+    process = models.ForeignKey(Process, on_delete=models.CASCADE, verbose_name=_('Process'), related_name='task',
+                                related_query_name='tasks')
 
     artifact_content_type = models.ForeignKey(
         ContentType, null=True, blank=True,
@@ -180,7 +181,7 @@ class Task(AbsTask):
     class Meta:  # noqa D101
         verbose_name = _('Task')
         verbose_name_plural = _('Tasks')
-        ordering = ['-created']
+        ordering = ['id','finished']
         indexes = [
             models.Index(
                 fields=["artifact_content_type", "artifact_object_id"]

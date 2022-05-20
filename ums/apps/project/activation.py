@@ -17,6 +17,7 @@ class STATUS:
     PREPARED = 'PREPARED'
     SCHEDULED = 'SCHEDULED'
     STARTED = 'STARTED'
+    DENY = 'DENY'
     UNRIPE = 'UNRIPE'  # 成熟
 
 
@@ -29,5 +30,20 @@ STATUS_CHOICES = [
     (STATUS.PREPARED, pgettext_lazy('STATUS', 'Prepared')),
     (STATUS.SCHEDULED, pgettext_lazy('STATUS', 'Scheduled')),
     (STATUS.STARTED, pgettext_lazy('STATUS', 'Started')),
+    (STATUS.DENY, pgettext_lazy('STATUS', 'Denied')),
     (STATUS.UNRIPE, pgettext_lazy('STATUS', 'Unripe')),
 ]
+
+
+STATUS_DISPLAY = {
+    'ASSIGNED': '待处理',
+    'CANCELED': '取消、撤回',
+    'DONE': '已完成',
+    'ERROR': '错误',
+    'NEW': '新创建',
+    'PREPARED': '准备中',
+    'SCHEDULED': '排期中',
+    'STARTED': '已开始',
+    'DENY': '驳回',
+    'UNRIPE': '未知',
+}
