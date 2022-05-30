@@ -519,6 +519,48 @@ class ProcessViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, url_path='get-issued-jobs')
+    @permission_classes([IsAuthenticated])
+    def get_issued_processes(self, request, *args, **kwargs):
+        user = request.user
+        queryset = Process.objects.filter(
+            # ~Q(status__in=[STATUS.DONE, STATUS.ERROR, STATUS.CANCELED, STATUS.DENY]),  # 执行中的任务
+            data__owner__id=user.id,
+            created__isnull=False
+        )
+        zip = []
+        if queryset:
+            achievement_ids = set([i.artifact.id for i in queryset])
+            print(achievement_ids)
+
+            for i in achievement_ids:
+                q = Process.objects.filter(
+                    # ~Q(status__in=[STATUS.DONE, STATUS.ERROR, STATUS.CANCELED, STATUS.DENY]),  # 执行中的任务
+                    data__owner__id=user.id,
+                    created__isnull=False,
+                    artifact_object_id=i,
+                ).latest('created')
+                zip.append(q)
+
+        page = self.paginate_queryset(zip)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(zip, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, url_path='get-issued-jobs-count')
+    @permission_classes([IsAuthenticated])
+    def get_issued_processes_count(self, request, *args, **kwargs):
+        user = request.user
+        queryset = Process.objects.filter(
+            ~Q(status__in=[STATUS.DONE, STATUS.ERROR, STATUS.CANCELED, STATUS.DENY]),  # 执行中的任务
+            data__owner__id=user.id
+        )
+
+        return Response({'count': queryset.count()}, status=200)
+
 
 class TaskViewSet(viewsets.ModelViewSet):
     queryset = Task.objects.all()
@@ -541,6 +583,28 @@ class TaskViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, url_path='get-issued-tasks')
+    @permission_classes([IsAuthenticated])
+    def get_issued_tasks(self, request, *args, **kwargs):
+        user = request.user
+        processes = Process.objects.filter(
+            ~Q(status__in=[STATUS.DONE, STATUS.ERROR, STATUS.CANCELED, STATUS.DENY]),  # 执行中的任务
+            data__owner__id=user.id
+        )
+
+        queryset = Task.objects.filter(
+            process__in = processes,
+            data__is_first=1,
+            owner=user
+        )
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
     @action(detail=False, url_path='user-has-missions')
     @permission_classes([IsAuthenticated])
     def user_has_missions(self, request, *args, **kwargs):
@@ -548,5 +612,5 @@ class TaskViewSet(viewsets.ModelViewSet):
         exists = Task.objects.filter(
             status=STATUS.ASSIGNED,
             owner=user.id,
-        ).exists()
-        return Response({'exists': exists == 1}, status=200)
+        )
+        return Response({'exists': exists.exists() == 1, 'count': exists.count()}, status=200)

@@ -104,7 +104,8 @@ class AchievementProcessHandlerFirstStage(AchievementProcessHandler):
             status=STATUS.DONE,  # 提交已完成
             data={
                 'is_withdraw': 0,
-                'is_first': 1  # 是首个task
+                'is_first': 1 , # 是首个task
+                'submitted_by':user.name,
             }
         )
         task.assigned = timezone.now()

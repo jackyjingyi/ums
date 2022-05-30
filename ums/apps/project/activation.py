@@ -34,11 +34,23 @@ STATUS_CHOICES = [
     (STATUS.UNRIPE, pgettext_lazy('STATUS', 'Unripe')),
 ]
 
-
 STATUS_DISPLAY = {
     'ASSIGNED': '待处理',
     'CANCELED': '取消、撤回',
     'DONE': '已完成',
+    'ERROR': '错误',
+    'NEW': '新创建',
+    'PREPARED': '准备中',
+    'SCHEDULED': '排期中',
+    'STARTED': '已开始',
+    'DENY': '驳回',
+    'UNRIPE': '未知',
+}
+
+FIRST_TASK_STATUS_DISPLAY = {
+    'ASSIGNED': '待处理',
+    'CANCELED': '取消、撤回',
+    'DONE': '已提交,待审核',
     'ERROR': '错误',
     'NEW': '新创建',
     'PREPARED': '准备中',
