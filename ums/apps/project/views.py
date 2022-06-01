@@ -483,7 +483,7 @@ class FileManagerViewSet(viewsets.ModelViewSet):
             raise PermissionDenied()
 
         return Response(
-            {'id': instance.pk, 'file_url': f'{request.scheme}://{request.get_host()}{instance.file.url}'}, status=200
+            {'id': instance.pk, 'file_url': instance.file.url}, status=200
         )
 
     def _download_permission_check(self, user, checker, achievement):
