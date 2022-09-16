@@ -1,9 +1,8 @@
-import json
 import logging
-from django.shortcuts import render
-from django.shortcuts import get_object_or_404
-from django.conf import settings
+import json
+import requests
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import Q
@@ -308,17 +307,85 @@ class AchievementViewSet(viewsets.ModelViewSet):
         """
         pass
 
-    @action(detail=True)
+    @action(detail=True, url_path='review-success', methods=['post'])
+    @permission_classes([IsAuthenticated])
     def review(self, request):
         """
         secretary review
+        {
+
+        }
         :param request:
         :return:
         """
-        pass
+        instance = self.get_object()
+        user = request.user
+        checker = ObjectPermissionChecker(user)
+        if checker.has_perm('final_review_achievement', instance):
+            pass
 
     def perform_review(self):
         pass
+
+    @action(detail=True, url_path='send-to-display')
+    def send_to_display(self, request, *args, **kwargs):
+        instance = self.get_object()
+        # 完成流程
+        if not instance.is_finished:
+            return Response(
+                {'msg': 'not ready'}, status=405
+            )
+        if instance.is_reviewed:
+            return Response(
+                {'msg': 'already done'}, status=405
+            )
+        # create API
+        result = {
+            "result_id": instance.id,
+            "contract_number": instance.name,
+            "pro_id": instance.project.id,
+            "pro_name": instance.project.project_title,
+            "pro_type": instance.project.get_project_type_display(),
+            "pro_cls": instance.project.get_project_cate_display(),
+            "file_list": [
+                {
+                    "file_id": file.id,
+                    "file_name": file.name,
+                    "file_url": f"{request.scheme}://{request.get_host()}{file.file.url}",
+                    "file_tags": [i.name for i in file.tags.all()]
+                } for file in
+                instance.files.all()
+            ]
+        }
+        # send to
+        print(result)
+        logging.warning(result)
+        headers = {'Content-type': 'application/json'}
+
+        # return Response(result, status=200)
+        res = requests.post(settings.DISPLAY_URL, data=json.dumps(result),headers=headers)
+        if 200 <= res.status_code <= 299:
+            instance.is_reviewed = True
+            instance.save()
+            print(res.json())
+            # todo: 更新文件地址
+            data = res.json()
+
+            for file in data.get('file_list'):
+                try:
+                    file_obj = FileManager.objects.get(pk=file.get('file_id'))
+                    file_obj.file_link = file.get('file_link')
+                    file_obj.save()
+                except FileManager.DoesNotExist:
+                    logging.error(f"file {file} does not exist")
+                    continue
+            return Response({
+                'msg': '上传展示平台成功'
+            }, status=200)
+        else:
+            return Response(
+                {'msg', '展示平台报错'}, status=res.status_code
+            )
 
     @action(detail=True, methods=['put'])
     @permission_classes([IsAuthenticated])
@@ -481,9 +548,10 @@ class FileManagerViewSet(viewsets.ModelViewSet):
         checker = ObjectPermissionChecker(user)
         if not self._download_permission_check(user, checker, achievement):
             raise PermissionDenied()
-
+        serializer = self.get_serializer(instance)
+        print(serializer.data)
         return Response(
-            {'id': instance.pk, 'file_url': f'{request.scheme}://{request.get_host()}{instance.file.url}'}, status=200
+            {'id': instance.pk, 'file_url': instance.file.url}, status=200
         )
 
     def _download_permission_check(self, user, checker, achievement):
@@ -519,6 +587,48 @@ class ProcessViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, url_path='get-issued-jobs')
+    @permission_classes([IsAuthenticated])
+    def get_issued_processes(self, request, *args, **kwargs):
+        user = request.user
+        queryset = Process.objects.filter(
+            # ~Q(status__in=[STATUS.DONE, STATUS.ERROR, STATUS.CANCELED, STATUS.DENY]),  # 执行中的任务
+            data__owner__id=user.id,
+            created__isnull=False
+        )
+        zip = []
+        if queryset:
+            achievement_ids = set([i.artifact.id for i in queryset])
+            print(achievement_ids)
+
+            for i in achievement_ids:
+                q = Process.objects.filter(
+                    # ~Q(status__in=[STATUS.DONE, STATUS.ERROR, STATUS.CANCELED, STATUS.DENY]),  # 执行中的任务
+                    data__owner__id=user.id,
+                    created__isnull=False,
+                    artifact_object_id=i,
+                ).latest('created')
+                zip.append(q)
+
+        page = self.paginate_queryset(zip)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(zip, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, url_path='get-issued-jobs-count')
+    @permission_classes([IsAuthenticated])
+    def get_issued_processes_count(self, request, *args, **kwargs):
+        user = request.user
+        queryset = Process.objects.filter(
+            ~Q(status__in=[STATUS.DONE, STATUS.ERROR, STATUS.CANCELED, STATUS.DENY]),  # 执行中的任务
+            data__owner__id=user.id
+        )
+
+        return Response({'count': queryset.count()}, status=200)
+
 
 class TaskViewSet(viewsets.ModelViewSet):
     queryset = Task.objects.all()
@@ -541,6 +651,28 @@ class TaskViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, url_path='get-issued-tasks')
+    @permission_classes([IsAuthenticated])
+    def get_issued_tasks(self, request, *args, **kwargs):
+        user = request.user
+        processes = Process.objects.filter(
+            ~Q(status__in=[STATUS.DONE, STATUS.ERROR, STATUS.CANCELED, STATUS.DENY]),  # 执行中的任务
+            data__owner__id=user.id
+        )
+
+        queryset = Task.objects.filter(
+            process__in=processes,
+            data__is_first=1,
+            owner=user
+        )
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
     @action(detail=False, url_path='user-has-missions')
     @permission_classes([IsAuthenticated])
     def user_has_missions(self, request, *args, **kwargs):
@@ -548,5 +680,5 @@ class TaskViewSet(viewsets.ModelViewSet):
         exists = Task.objects.filter(
             status=STATUS.ASSIGNED,
             owner=user.id,
-        ).exists()
-        return Response({'exists': exists == 1}, status=200)
+        )
+        return Response({'exists': exists.exists() == 1, 'count': exists.count()}, status=200)

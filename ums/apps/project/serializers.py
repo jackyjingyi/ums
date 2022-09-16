@@ -5,11 +5,15 @@ from taggit.serializers import TaggitSerializer, TagListSerializerField
 from ums.apps.accounts.serializers import UserSerializer
 from .models import Project, Process, Task, FileManager, Achievement
 from .utils import AchievementStateChoices
-from .activation import STATUS, STATUS_DISPLAY
+from .activation import STATUS, STATUS_DISPLAY, FIRST_TASK_STATUS_DISPLAY
 
 
 def get_status_display(status):
     return STATUS_DISPLAY[status]
+
+
+def get_first_task_status_display(status):
+    return FIRST_TASK_STATUS_DISPLAY[status]
 
 
 class FileManagerSerializer(TaggitSerializer, serializers.ModelSerializer):
@@ -122,8 +126,13 @@ class TaskSerializer(serializers.ModelSerializer):
         if instance:
             ret['owner_name'] = instance.owner.name
             ret['owner_mime'] = instance.owner.mime
-            ret['status_display'] = get_status_display(instance.status)
-            ret['submitted_by'] = instance.data.get('submitted_by', 'person')
+            if instance.data:
+
+                ret['status_display'] = get_status_display(instance.status)
+                try:
+                    ret['submitted_by'] = instance.data.get('submitted_by', 'person')
+                except AttributeError:
+                    ret['submitted_by'] = 'person'
         return ret
 
 
@@ -134,3 +143,12 @@ class ProcessSerializer(serializers.ModelSerializer):
         model = Process
         fields = "__all__"
         ordering = ['finished']
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['project_name'] = instance.artifact.project.project_title
+        ret['project_id'] = instance.artifact.project.project_id
+        ret['achievement_id'] = instance.artifact.id
+        ret['achievement_name'] = instance.artifact.name
+        ret['status_display'] = get_status_display(instance.status)
+        return ret

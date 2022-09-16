@@ -104,7 +104,8 @@ class AchievementProcessHandlerFirstStage(AchievementProcessHandler):
             status=STATUS.DONE,  # 提交已完成
             data={
                 'is_withdraw': 0,
-                'is_first': 1  # 是首个task
+                'is_first': 1 , # 是首个task
+                'submitted_by':user.name,
             }
         )
         task.assigned = timezone.now()
@@ -251,9 +252,10 @@ class ActionHandler:
         if stage == 2 and process.status == STATUS.DONE:
             # 如果结束，去掉所有leader的 approval权限
             # 收回所有用户的withdraw，change， submit， delete权限
-            self._flush_perms(stage)
-            self.instance.state = AchievementStateChoices.APP.value
             self.instance.status2 = STATUS.DONE
+            self.instance.is_finished = True  # 流程结束
+            self._flush_perms(stage)
+
         # state 改为已通过
         self.instance.state = AchievementStateChoices.APP.value
         self.instance.save()
