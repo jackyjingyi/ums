@@ -14,6 +14,11 @@ class ProjectCateChoices(models.TextChoices):
     BS = '1', _('业务服务')  # Business Services
 
 
+class ContractChoices(models.TextChoices):
+    MAIN = '0', _('主合同')
+    OUTSOURCE = '1', _('外协合同')
+
+
 class ProjectStatusChoices(models.TextChoices):
     NEW = 'NEW', _('新创建')  # 新创建， 允许修改、删除, 允许上传成果
     START = 'START', _('成果上传中')  # non-editable, 允许上传成果
@@ -27,8 +32,3 @@ class AchievementStateChoices(models.TextChoices):
     APP = '3', _('审批通过')
     DENY = '4', _('审批驳回')
     WITHDRAW = '5', _('已撤销')
-
-
-
-
-

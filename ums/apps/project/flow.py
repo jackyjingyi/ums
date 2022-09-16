@@ -252,9 +252,10 @@ class ActionHandler:
         if stage == 2 and process.status == STATUS.DONE:
             # 如果结束，去掉所有leader的 approval权限
             # 收回所有用户的withdraw，change， submit， delete权限
-            self._flush_perms(stage)
-            self.instance.state = AchievementStateChoices.APP.value
             self.instance.status2 = STATUS.DONE
+            self.instance.is_finished = True  # 流程结束
+            self._flush_perms(stage)
+
         # state 改为已通过
         self.instance.state = AchievementStateChoices.APP.value
         self.instance.save()

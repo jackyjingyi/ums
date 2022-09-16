@@ -13,7 +13,8 @@ from taggit.managers import TaggableManager
 from taggit.models import TaggedItemBase
 from ..accounts.utils import RoleChoices
 from .activation import STATUS, STATUS_CHOICES
-from .utils import ProjectTypeChoices, ProjectCateChoices, ProjectStatusChoices, AchievementStateChoices
+from .utils import ProjectTypeChoices, ProjectCateChoices, ProjectStatusChoices, AchievementStateChoices, \
+    ContractChoices
 
 
 class Project(models.Model):
@@ -59,6 +60,8 @@ class Achievement(models.Model):
     name = models.CharField(_('成果名称'), max_length=25)
     stage = models.CharField(_('工作阶段'), max_length=255, null=True, blank=True)
     output_list = models.CharField(_('成果清单'), max_length=255, null=True, blank=True)
+    contract_type = models.CharField('合同类型', choices=ContractChoices.choices, default=ContractChoices.MAIN.value,
+                                     db_index=True, max_length=5)
     creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='achievement_creator')
     created = models.DateTimeField(_('创建时间'), auto_now_add=True, null=True)
     updated = models.DateTimeField(_('更新时间'), auto_now=True, null=True)
@@ -112,6 +115,7 @@ class FileManager(models.Model):
         on_delete=models.CASCADE, verbose_name=_('文件上传人'), related_name='outcome_owner'
     )
     tags = TaggableManager(verbose_name=_('标签'), through=TaggedFile)
+    file_link = models.CharField(_('展示链接'), max_length=255, default='')
 
 
 class AbsProcess(models.Model):
@@ -181,7 +185,7 @@ class Task(AbsTask):
     class Meta:  # noqa D101
         verbose_name = _('Task')
         verbose_name_plural = _('Tasks')
-        ordering = ['id','finished']
+        ordering = ['id', 'finished']
         indexes = [
             models.Index(
                 fields=["artifact_content_type", "artifact_object_id"]
